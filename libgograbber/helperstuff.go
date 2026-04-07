@@ -45,22 +45,22 @@ type StringSet struct {
 }
 
 type Host struct {
-	Path                      string
-	HostAddr                  string
-	Port                      int
-	Protocol                  string
-	ScreenshotFilename        string
-	ResponseBodyFilename      string
-	Soft404RandomURL          string
-	Soft404RandomPageContents []string
-	PrefetchDone              bool
-	Soft404Done               bool
-	HTTPResp                  *http.Response
-	HTTPReq                   *http.Request
-	HostHeader                string
-	UserAgent                 string
-	Cookies                   string
-	RequestHeaders            map[string]string
+	Path                      string              `json:"path" xml:"path"`
+	HostAddr                  string              `json:"host_addr" xml:"host_addr"`
+	Port                      int                 `json:"port" xml:"port"`
+	Protocol                  string              `json:"protocol" xml:"protocol"`
+	ScreenshotFilename        string              `json:"screenshot_filename,omitempty" xml:"screenshot_filename,omitempty"`
+	ResponseBodyFilename      string              `json:"response_body_filename,omitempty" xml:"response_body_filename,omitempty"`
+	Soft404RandomURL          string              `json:"soft404_random_url,omitempty" xml:"soft404_random_url,omitempty"`
+	Soft404RandomPageContents []byte              `json:"-" xml:"-"`
+	PrefetchDone              bool                `json:"-" xml:"-"`
+	Soft404Done               bool                `json:"-" xml:"-"`
+	HTTPResp                  *http.Response      `json:"-" xml:"-"`
+	HTTPReq                   *http.Request       `json:"-" xml:"-"`
+	HostHeader                string              `json:"host_header,omitempty" xml:"host_header,omitempty"`
+	UserAgent                 string              `json:"user_agent,omitempty" xml:"user_agent,omitempty"`
+	Cookies                   string              `json:"cookies,omitempty" xml:"cookies,omitempty"`
+	RequestHeaders            map[string]string   `json:"request_headers,omitempty" xml:"request_headers,omitempty"`
 }
 
 func (host *Host) PrefetchHash() (h string) {
@@ -243,6 +243,9 @@ func GetDataFromFile(fileName string) (data []string, err error) {
 // StrArrToInt takes an array of strings and *hopefully* returns an array of ints?
 func StrArrToInt(t []string) (t2 []int) {
 	for _, i := range t {
+		if i == "" {
+			continue
+		}
 		j, err := strconv.Atoi(i)
 		if err != nil {
 			panic(err)
@@ -342,11 +345,23 @@ func GenerateURLs(targetList StringSet, Ports IntSet, Paths *StringSet, targets 
 }
 
 func ParseURLToHost(URL string, targets chan Host) {
-	URLObj, err := url.ParseRequestURI(URL)
-	if err != nil {
-		// URL isn't valid
+	URL = strings.TrimSpace(URL)
+	if URL == "" {
 		return
 	}
+	
+	URLObj, err := url.ParseRequestURI(URL)
+	if err != nil || URLObj.Scheme == "" {
+		// Attempt to add http:// if no scheme was provided
+		URLObj, err = url.ParseRequestURI("http://" + URL)
+		if err != nil {
+			if Error != nil {
+				Error.Printf("Invalid URL provided and could not be parsed: %s\n", URL)
+			}
+			return
+		}
+	}
+
 	port := URLObj.Port()
 	var Port int
 	if port != "" {

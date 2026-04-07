@@ -3,6 +3,7 @@ package libgograbber
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,20 +12,25 @@ func RoutineManager(s *State, ScanChan chan Host, DirbustChan chan Host, Screens
 	threadChan := make(chan struct{}, s.Threads)
 	currTime := GetTimeString()
 
-	if s.Debug {
-		ticker := time.NewTicker(10 * time.Second)
-		startTime := time.Now()
-		go func() {
-			var currTime time.Duration
-			for t := range ticker.C {
-				currTime = t.Sub(startTime)
-				fmt.Printf(LineSep())
-				Debug.Printf("Elapsed %v\n", currTime)
-				fmt.Printf(LineSep())
-
+	ticker := time.NewTicker(5 * time.Second)
+	startTime := time.Now()
+	go func() {
+		var currTime time.Duration
+		for t := range ticker.C {
+			currTime = t.Sub(startTime)
+			scanCnt := atomic.LoadInt64(&s.ScanCounter)
+			dirbCnt := atomic.LoadInt64(&s.DirbustCounter)
+			screenCnt := atomic.LoadInt64(&s.ScreenshotCounter)
+			
+			if s.Debug {
+				fmt.Print(LineSep())
+				Debug.Printf("Elapsed %v | Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime, scanCnt, dirbCnt, screenCnt)
+				fmt.Print(LineSep())
+			} else {
+				Info.Printf("Progress [%v] - Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime.Round(time.Second), scanCnt, dirbCnt, screenCnt)
 			}
-		}()
-	}
+		}
+	}()
 
 	// Start our operations
 	wg.Add(1)

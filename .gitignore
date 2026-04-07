@@ -1,4 +1,30 @@
-**/.DS_Store
+# Binaries
+gograbber
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage
+*.test
+*.out
+coverage.out
+
+# Output
+gograbber_output/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Misc
+vendor/
 **/config.json
 oldshit.go
 csto.go

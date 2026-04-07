@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/swarley7/phantomjs"
+	"github.com/go-rod/rod"
 )
 
 type State struct {
@@ -13,7 +13,6 @@ type State struct {
 	Expanded               bool
 	Extensions             StringSet
 	FollowRedirect         bool
-	PhantomProcesses       []phantomjs.Process
 	ScreenshotQuality      int
 	ScreenshotDirectory    string
 	ScreenshotFileType     string
@@ -25,7 +24,7 @@ type State struct {
 	ProjectName            string
 	DirbustOutputDirectory string
 	IncludeLength          bool
-	NumPhantomProcs        int
+	NumScreenshotWorkers   int
 	HttpClient             *http.Client
 	HTTPResponseDirectory  string
 	Ratio                  float64
@@ -57,8 +56,7 @@ type State struct {
 	URLProvided            bool
 	Dirbust                bool
 	SingleURL              string
-	PhantomJSPath          string
-	URLComponents          []Host
+	Browser                *rod.Browser
 	Targets                chan Host
 	Paths                  StringSet
 	UseSlash               bool
@@ -70,5 +68,9 @@ type State struct {
 	Wordlist               string
 	Version                string
 	OutputDirectory        string
+	OutputFormats          []string
 	StartTime              time.Time
+	ScanCounter            int64
+	DirbustCounter         int64
+	ScreenshotCounter      int64
 }

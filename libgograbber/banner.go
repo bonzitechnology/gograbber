@@ -39,7 +39,7 @@ func LineSep() string {
 }
 
 func PrintOpts(s *State) {
-	fmt.Printf(LineSep())
+	fmt.Print(LineSep())
 	keys := reflect.ValueOf(s).Elem()
 	typeOfT := keys.Type()
 	if s.VerbosityLevel > 4 {
@@ -47,7 +47,7 @@ func PrintOpts(s *State) {
 			f := keys.Field(i)
 			Debug.Printf("%s: = %v\n", typeOfT.Field(i).Name, f.Interface())
 		}
-		fmt.Printf(LineSep())
+		fmt.Print(LineSep())
 	}
 
 }

@@ -12,33 +12,34 @@ import (
 	"sync"
 	"time"
 
-	phantomjs "github.com/swarley7/phantomjs"
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 )
 
 // Initialise sets up the program's state
-func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, protocols string, timeout int, AdvancedUsage bool, easy bool, HostHeaderFile string, httpHeaders string, extensions string) {
+func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, protocols string, timeout int, AdvancedUsage bool, easy bool, HostHeaderFile string, httpHeaders string, extensions string, outputFormats string) {
 	if AdvancedUsage {
 
 		var Usage = func() {
-			fmt.Printf(LineSep())
+			fmt.Print(LineSep())
 			fmt.Fprintf(os.Stderr, "Advanced usage of %s:\n", os.Args[0])
 			flag.PrintDefaults()
-			fmt.Printf(LineSep())
+			fmt.Print(LineSep())
 			fmt.Printf("Examples for %s:\n", os.Args[0])
 			fmt.Printf(">> Scan and dirbust the hosts from hosts.txt.\n")
 			fmt.Printf("%v -i hosts.txt -w wordlist.txt -t 2000 -scan -dirbust\n", os.Args[0])
 			fmt.Printf(">> Scan and dirbust the hosts from hosts.txt, and screenshot discovered web resources.\n")
 			fmt.Printf("%v -i hosts.txt -w wordlist.txt -t 2000 -scan  -dirbust -screenshot\n", os.Args[0])
-			fmt.Printf(">> Scan, dirbust, and screenshot the hosts from hosts.txt on common web application ports. Additionally, set the number of phantomjs processes to 3.\n")
+			fmt.Printf(">> Scan, dirbust, and screenshot the hosts from hosts.txt on common web application ports. Additionally, set the number of screenshot workers to 3.\n")
 			fmt.Printf("%v -i hosts.txt -w wordlist.txt -t 2000 -p_procs=3 -p top -scan -dirbust -screenshot\n", os.Args[0])
-			fmt.Printf(">> Screenshot the URLs from urls.txt. Additionally, use a custom phantomjs path.\n")
-			fmt.Printf("%v -U urls.txt -t 200 -j 400 -phantomjs /my/path/to/phantomjs -screenshot\n", os.Args[0])
-			fmt.Printf(">> Screenshot the supplied URL. Additionally, use a custom phantomjs path.\n")
-			fmt.Printf("%v -u http://example.com/test -t 200 -j 400 -phantomjs /my/path/to/phantomjs -screenshot\n", os.Args[0])
+			fmt.Printf(">> Screenshot the URLs from urls.txt.\n")
+			fmt.Printf("%v -U urls.txt -t 200 -j 400 -screenshot\n", os.Args[0])
+			fmt.Printf(">> Screenshot the supplied URL.\n")
+			fmt.Printf("%v -u http://example.com/test -t 200 -j 400 -screenshot\n", os.Args[0])
 			fmt.Printf(">> EASY MODE/I DON'T WANT TO READ STUFF LEMME HACK OK?.\n")
 			fmt.Printf("%v -i hosts.txt -w wordlist.txt -easy\n", os.Args[0])
 
-			fmt.Printf(LineSep())
+			fmt.Print(LineSep())
 		}
 		Usage()
 		os.Exit(0)
@@ -51,9 +52,10 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 		s.Dirbust = true
 		s.Screenshot = true
 		s.Threads = 1000
-		s.NumPhantomProcs = 7
+		s.NumScreenshotWorkers = 7
 		ports = "top"
 	}
+	s.OutputFormats = strings.Split(outputFormats, ",")
 	s.Extensions = StringSet{map[string]bool{}}
 	for _, p := range strings.Split(extensions, ",") {
 		s.Extensions.Add(p)
@@ -79,11 +81,11 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 		if err != nil {
 			Error.Printf("Your JSON looks pretty bad eh. You should do something about that: [%v]", httpHeaders)
 		}
-		// Debug.Println(s.HttpHeaders)
 	}
 
 	s.Timeout = time.Duration(timeout) * time.Second
 
+	d.Timeout = s.Timeout
 	tx = &http.Transport{
 		DialContext:        (d).DialContext,
 		DisableCompression: true,
@@ -126,12 +128,9 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 	}
 
 	if s.URLProvided { // A url and/or file full of urls was supplied - treat them as gospel
-		// wg := sync.WaitGroup{}
-		// wg.Add(1)
-		go func() { // for reasons unknown this seems to work ok... other things dont. I don't understand computers
+		go func() {
 			defer func() {
 				close(s.Targets)
-				// wg.Done()
 			}()
 			if s.URLFile != "" {
 				inputData, err := GetDataFromFile(s.URLFile)
@@ -140,7 +139,6 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 					panic(err)
 				}
 				for _, item := range inputData {
-					// Info.Println(item)
 					ParseURLToHost(item, s.Targets)
 				}
 			}
@@ -173,9 +171,7 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 		if err != nil {
 			panic(err)
 		}
-		// c := make(chan StringSet)
 		targetList := ExpandHosts(inputData)
-		//  := <-c
 		if s.Debug {
 			for target := range targetList.Set {
 				Debug.Printf("Target: %v\n", target)
@@ -183,25 +179,22 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 		}
 		s.Hosts = targetList
 	}
-	// c2 := make(chan []Host)
 	s.Protocols = StringSet{map[string]bool{}}
 	for _, p := range strings.Split(protocols, ",") {
 		s.Protocols.Add(p)
 	}
 
 	go GenerateURLs(s.Hosts, s.Ports, &s.Paths, s.Targets)
-	// fmt.Println(s)
 	if !s.Dirbust && !s.Scan && !s.Screenshot && !s.URLProvided {
 		flag.Usage()
 		os.Exit(1)
 	}
-	// close(s.Targets)
 	return
 }
 
 // Start does the thing
-func Start(s State) {
-	fmt.Printf(LineSep())
+func Start(s *State) {
+	fmt.Print(LineSep())
 
 	os.Mkdir(path.Join(s.OutputDirectory), 0755) // drwxr-xr-x
 	ScanChan := make(chan Host)
@@ -218,41 +211,40 @@ func Start(s State) {
 		os.Mkdir(s.DirbustOutputDirectory, 0755) // drwxr-xr-x
 	}
 	if s.Screenshot {
-		procs := make([]phantomjs.Process, s.NumPhantomProcs)
 		if s.Debug {
-			Debug.Printf("Creating [%v] PhantomJS processes... This could take a second\n", s.NumPhantomProcs)
+			Debug.Printf("Creating Chromium browser instance... This could take a second\n")
 		}
-		for i := 0; i < s.NumPhantomProcs; i++ {
-			procs[i] = phantomjs.Process{BinPath: s.PhantomJSPath,
-				Port:            phantomjs.DefaultPort + i,
-				Stdout:          os.Stdout,
-				Stderr:          os.Stderr,
-				IgnoreSslErrors: s.IgnoreSSLErrors,
-			}
-			if err := procs[i].Open(); err != nil {
-				panic(err)
-			}
-			Info.Printf("-> Phantomjs process: #[%v] (%v of %v) created on localhost:%v\n", i, i+1, s.NumPhantomProcs, phantomjs.DefaultPort+i)
-			defer procs[i].Close()
+		l := launcher.New().Headless(true)
+		if s.IgnoreSSLErrors {
+			l = l.Set("ignore-certificate-errors", "true")
 		}
-		s.PhantomProcesses = procs
+		u := l.MustLaunch()
+		s.Browser = rod.New().ControlURL(u).MustConnect()
+
 		s.ScreenshotDirectory = path.Join(s.OutputDirectory, "screenshots")
 		os.Mkdir(s.ScreenshotDirectory, 0755) // drwxr-xr-x
 		if s.Debug {
-			Debug.Printf("Testing %v URLs\n", len(s.URLComponents)*len(s.Paths.Set))
+			Debug.Printf("Screenshot engine initialized.\n")
 		}
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go RoutineManager(&s, ScanChan, DirbChan, ScreenshotChan, &wg)
+	go RoutineManager(s, ScanChan, DirbChan, ScreenshotChan, &wg)
 
 	s.ReportDirectory = path.Join(s.OutputDirectory, "report")
 	os.Mkdir(s.ReportDirectory, 0755) // drwxr-xr-x
-	reportFile := MarkdownReport(&s, ScreenshotChan)
+	reportFiles := Report(s, ScreenshotChan)
 	wg.Wait()
+	
+	if s.Browser != nil {
+		s.Browser.MustClose()
+	}
+	
 	currentTime := time.Now()
-	fmt.Printf(LineSep())
+	fmt.Print(LineSep())
 	Info.Printf("Gograbber completed in [%v] seconds\n", g.Sprintf("%v", currentTime.Sub(s.StartTime)))
-	Info.Printf("Report written to: [%v]\n", g.Sprintf("%s", reportFile))
-	fmt.Printf(LineSep())
+	for _, reportFile := range reportFiles {
+		Info.Printf("Report written to: [%v]\n", g.Sprintf("%s", reportFile))
+	}
+	fmt.Print(LineSep())
 }

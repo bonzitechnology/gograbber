@@ -6,6 +6,8 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	// "./libgograbber"
@@ -28,6 +30,7 @@ func parseCMDLine() *libgograbber.State {
 	var HostHeaderFile string
 	var httpHeaders string
 	var extensions string
+	var outputFormats string
 	libgograbber.InitLogger(os.Stdout, os.Stderr, os.Stderr, os.Stderr, os.Stderr)
 
 	// Commandline arguments
@@ -65,19 +68,19 @@ func parseCMDLine() *libgograbber.State {
 
 	// Reporting
 	flag.StringVar(&s.OutputDirectory, "o", "gograbber_output", "Directory to store output in")
+	flag.StringVar(&outputFormats, "f", "md", "Output formats (comma separated: md, json, csv, xml)")
 	flag.StringVar(&s.ProjectName, "project", "hack", "Name this project (if you want, otherwise... whatever?)")
 
 	// screenshot related
 
 	flag.BoolVar(&s.Screenshot, "screenshot", false, "Take pretty pictures of discovered URLs")
-	flag.IntVar(&s.NumPhantomProcs, "p_procs", 5, "Number of phantomjs processes to spawn; helps when you're trying to screenshot a ton of stuff at once.")
+	flag.IntVar(&s.NumScreenshotWorkers, "p_procs", 5, "Number of concurrent screenshot workers")
 	flag.StringVar(&s.Cookies, "C", "", "Optional cookies to supply with each request. Provide as a semicolon separated string, e.g. \"'cookie1=value1;cookie2=value2'\" (so just like, copy paste from Burp)")
 	flag.StringVar(&s.UserAgent, "ua", fmt.Sprintf("gograbber - %v - yeeee", s.Version), "Set a custom user agent")
 
 	flag.IntVar(&s.ImgX, "img_x", 1024, "The width of screenshot images in pixels")
 	flag.IntVar(&s.ImgY, "img_y", 800, "The height of screenshot images in pixels")
 	flag.IntVar(&s.ScreenshotQuality, "Q", 50, "Screenshot quality as a percentage (higher means more megatronz per screenshot).")
-	flag.StringVar(&s.PhantomJSPath, "phantomjs", "phantomjs", "Path to phantomjs binary for rendering web pages")
 	flag.BoolVar(&AdvancedUsage, "hh", false, "Print advanced usage details with examples!")
 	flag.BoolVar(&s.FollowRedirects, "fr", true, "Follow redirects")
 	flag.StringVar(&s.ScreenshotFileType, "screenshot_ext", "png", "Filetype for screenshots (valid are pdf, png, jpg)")
@@ -96,7 +99,7 @@ func parseCMDLine() *libgograbber.State {
 			http.ListenAndServe("localhost:6060", nil)
 		}()
 	}
-	libgograbber.Initialise(&s, ports, wordlist, statusCodesIgn, protocols, timeout, AdvancedUsage, easy, HostHeaderFile, httpHeaders, extensions)
+	libgograbber.Initialise(&s, ports, wordlist, statusCodesIgn, protocols, timeout, AdvancedUsage, easy, HostHeaderFile, httpHeaders, extensions, outputFormats)
 	return &s
 }
 
@@ -104,9 +107,21 @@ func main() {
 	//profiling code - handy when dealing with concurrency and deadlocks ._.
 
 	state := parseCMDLine()
+	
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		fmt.Println("\n[!] Ctrl+C detected. Shutting down gracefully...")
+		if state != nil && state.Browser != nil {
+			state.Browser.MustClose()
+		}
+		os.Exit(1)
+	}()
+
 	// lib.PrintOpts(state)
 	if state != nil {
 		// dothething awww ye
-		libgograbber.Start(*state)
+		libgograbber.Start(state)
 	}
 }

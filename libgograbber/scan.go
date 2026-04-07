@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,12 +33,14 @@ func Scan(s *State, Targets chan Host, ScanChan chan Host, currTime string, thre
 		portScanOutFile = fmt.Sprintf("%v/hosts_%v_%v.txt", s.ScanOutputDirectory, currTime, rand.Int63())
 	}
 	go writerWorker(sWriteChan, portScanOutFile)
-	for host := range s.Targets {
+	for host := range Targets {
+		atomic.AddInt64(&s.ScanCounter, 1)
 		scanWg.Add(1)
 		threadChan <- struct{}{}
 		go ConnectHost(&scanWg, s.Timeout, s.Jitter, s.Debug, host, ScanChan, threadChan, sWriteChan)
 	}
 	scanWg.Wait()
+	close(sWriteChan)
 }
 
 // connectHost does the actual TCP connection
