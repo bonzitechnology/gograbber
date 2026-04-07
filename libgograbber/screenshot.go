@@ -68,7 +68,7 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 	if host.ResponseBodyFilename != "" {
 		if body, err := os.ReadFile(host.ResponseBodyFilename); err == nil {
 			router := page.HijackRequests()
-			defer router.MustStop()
+			defer router.Stop()
 			
 			router.MustAdd("*", func(ctx *rod.Hijack) {
 				reqURL := ctx.Request.URL().String()

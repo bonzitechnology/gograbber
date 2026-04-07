@@ -10,6 +10,7 @@ gograbber
 *.test
 *.out
 coverage.out
+*.txt
 
 # Output
 gograbber_output/
