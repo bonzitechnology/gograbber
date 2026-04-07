@@ -14,6 +14,7 @@
 - 🎯 **Multi-Target Support:** Seamlessly supply individual hosts, IP addresses, CIDR ranges, or a raw list of URLs.
 - ⚡️ **Unified Pipeline:** Perform TCP port scanning, directory discovery, and screenshotting in one continuous execution flow. No need to chain multiple tools!
 - 📸 **Modern Screenshot Engine:** Powered by `go-rod` for reliable, headless Chromium-based rendering. Automatically downloads Chromium if it isn't installed.
+- 🥷 **Network Hijacking (Zero-Network Screenshots):** `gograbber` intercepts Chromium's navigation requests and instantly serves the HTML body already downloaded during the directory bruteforcing phase. This results in **massive speed gains**, avoids IP bans, and guarantees the screenshot matches *exactly* what the scanner saw (preserving state, cookies, and one-time tokens)!
 - 📊 **Flexible Reporting:** Generate beautiful, structured reports in **Markdown, JSON, CSV, and XML** formats simultaneously.
 - 🧠 **Smart Soft-404 Detection:** Dynamically detects "wildcard" responses (e.g., sites returning 200 OK for every request) to drastically reduce false positives during directory bruteforcing.
 - 🚀 **Highly Concurrent:** Built heavily on Go routines and robust worker pools for maximum speed and stability without deadlocks or race conditions.
@@ -74,6 +75,10 @@ Pass a custom Host header file to bypass WAFs/CDNs, supply authenticated session
 ---
 
 ## 🎛 Command Line Arguments
+
+> **⚠️ Important: Understanding `-i` vs `-U`**
+> - **`-i` (Raw Targets):** Use this for broad discovery. It expects raw IPs, CIDR ranges, or hostnames (e.g., `10.0.0.1`, `example.com`). `gograbber` will pass these through the **TCP Port Scanner**, multiply them by your chosen ports (`-p`) and protocols (`-P`), and dynamically generate URLs for the next phases.
+> - **`-U` (Complete URLs):** Use this for precision targeting. It expects fully formed URLs (e.g., `https://example.com:8443/admin`). Targets passed here **completely bypass the TCP port scanner** and are injected directly into the Directory Bruteforcing and Screenshotting phases.
 
 ### Core Execution
 | Flag | Description | Default |
