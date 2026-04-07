@@ -29,7 +29,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/swarley7/gograbber.git
+git clone https://github.com/bonzitechnology/gograbber.git
 
 # Navigate into the directory
 cd gograbber

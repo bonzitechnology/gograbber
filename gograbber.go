@@ -11,7 +11,7 @@ import (
 	"time"
 
 	// "./libgograbber"
-	"github.com/swarley7/gograbber/libgograbber"
+	"github.com/bonzitechnology/gograbber/libgograbber"
 )
 
 func parseCMDLine() *libgograbber.State {
