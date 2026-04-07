@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"sync"
 	"testing"
 )
@@ -18,7 +19,7 @@ func TestRoutineManagerNoOps(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go RoutineManager(s, scanChan, dirbChan, screenChan, &wg)
+	go RoutineManager(context.Background(), s, scanChan, dirbChan, screenChan, &wg)
 
 	// Consume screenChan until closed
 	var count int

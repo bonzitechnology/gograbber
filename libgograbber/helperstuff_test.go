@@ -52,6 +52,7 @@ func TestExpandHosts(t *testing.T) {
 }
 
 func TestParseURLToHost(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	tests := []struct {
 		input    string
 		expected Host
@@ -62,7 +63,7 @@ func TestParseURLToHost(t *testing.T) {
 
 	for _, tc := range tests {
 		targets := make(chan Host, 1)
-		ParseURLToHost(tc.input, targets)
+		ParseURLToHost(loggers, tc.input, targets)
 		close(targets)
 		got := <-targets
 		if got.HostAddr != tc.expected.HostAddr || got.Port != tc.expected.Port || got.Protocol != tc.expected.Protocol || got.Path != tc.expected.Path {
@@ -128,6 +129,7 @@ func TestPadding(t *testing.T) {
 }
 
 func TestFileStuff(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	content := "line1\nline2\nline3"
 	tmpfile, err := os.CreateTemp("", "testfile")
 	if err != nil {
@@ -151,7 +153,7 @@ func TestFileStuff(t *testing.T) {
 		t.Errorf("readLines got %v, expected %v", lines, expected)
 	}
 
-	data, err := GetDataFromFile(tmpfile.Name())
+	data, err := GetDataFromFile(loggers, tmpfile.Name())
 	if err != nil {
 		t.Errorf("GetDataFromFile failed: %v", err)
 	}

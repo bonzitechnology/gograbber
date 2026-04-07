@@ -2,6 +2,7 @@ package libgograbber
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -45,22 +46,22 @@ type StringSet struct {
 }
 
 type Host struct {
-	Path                      string              `json:"path" xml:"path"`
-	HostAddr                  string              `json:"host_addr" xml:"host_addr"`
-	Port                      int                 `json:"port" xml:"port"`
-	Protocol                  string              `json:"protocol" xml:"protocol"`
-	ScreenshotFilename        string              `json:"screenshot_filename,omitempty" xml:"screenshot_filename,omitempty"`
-	ResponseBodyFilename      string              `json:"response_body_filename,omitempty" xml:"response_body_filename,omitempty"`
-	Soft404RandomURL          string              `json:"soft404_random_url,omitempty" xml:"soft404_random_url,omitempty"`
-	Soft404RandomPageContents []byte              `json:"-" xml:"-"`
-	PrefetchDone              bool                `json:"-" xml:"-"`
-	Soft404Done               bool                `json:"-" xml:"-"`
-	HTTPResp                  *http.Response      `json:"-" xml:"-"`
-	HTTPReq                   *http.Request       `json:"-" xml:"-"`
-	HostHeader                string              `json:"host_header,omitempty" xml:"host_header,omitempty"`
-	UserAgent                 string              `json:"user_agent,omitempty" xml:"user_agent,omitempty"`
-	Cookies                   string              `json:"cookies,omitempty" xml:"cookies,omitempty"`
-	RequestHeaders            map[string]string   `json:"request_headers,omitempty" xml:"request_headers,omitempty"`
+	Path                      string            `json:"path" xml:"path"`
+	HostAddr                  string            `json:"host_addr" xml:"host_addr"`
+	Port                      int               `json:"port" xml:"port"`
+	Protocol                  string            `json:"protocol" xml:"protocol"`
+	ScreenshotFilename        string            `json:"screenshot_filename,omitempty" xml:"screenshot_filename,omitempty"`
+	ResponseBodyFilename      string            `json:"response_body_filename,omitempty" xml:"response_body_filename,omitempty"`
+	Soft404RandomURL          string            `json:"soft404_random_url,omitempty" xml:"soft404_random_url,omitempty"`
+	Soft404RandomPageContents []byte            `json:"-" xml:"-"`
+	PrefetchDone              bool              `json:"-" xml:"-"`
+	Soft404Done               bool              `json:"-" xml:"-"`
+	HTTPResp                  *http.Response    `json:"-" xml:"-"`
+	HTTPReq                   *http.Request     `json:"-" xml:"-"`
+	HostHeader                string            `json:"host_header,omitempty" xml:"host_header,omitempty"`
+	UserAgent                 string            `json:"user_agent,omitempty" xml:"user_agent,omitempty"`
+	Cookies                   string            `json:"cookies,omitempty" xml:"cookies,omitempty"`
+	RequestHeaders            map[string]string `json:"request_headers,omitempty" xml:"request_headers,omitempty"`
 }
 
 func (host *Host) PrefetchHash() (h string) {
@@ -90,16 +91,6 @@ func (host *Host) Soft404DoneCheck(hashes map[string]bool) bool {
 	return false
 }
 
-var (
-	Good    *log.Logger
-	Info    *log.Logger
-	Warning *log.Logger
-	Debug   *log.Logger
-	Error   *log.Logger
-)
-
-// var g, y, r, m, b *color.Color
-
 func InitColours() {
 
 }
@@ -109,27 +100,29 @@ func InitLogger(
 	infoHandle io.Writer,
 	debugHandle io.Writer,
 	warningHandle io.Writer,
-	errorHandle io.Writer) {
+	errorHandle io.Writer) Loggers {
 
-	Good = log.New(goodHandle,
-		g.Sprintf("GOOD: "),
-		log.Ldate|log.Ltime)
+	return Loggers{
+		Good: log.New(goodHandle,
+			g.Sprintf("GOOD: "),
+			log.Ldate|log.Ltime),
 
-	Info = log.New(infoHandle,
-		b.Sprintf("INFO: "),
-		log.Ldate|log.Ltime)
+		Info: log.New(infoHandle,
+			b.Sprintf("INFO: "),
+			log.Ldate|log.Ltime),
 
-	Debug = log.New(debugHandle,
-		y.Sprintf("DEBUG: "),
-		log.Ldate|log.Ltime)
+		Debug: log.New(debugHandle,
+			y.Sprintf("DEBUG: "),
+			log.Ldate|log.Ltime),
 
-	Warning = log.New(warningHandle,
-		m.Sprintf("WARNING: "),
-		log.Ldate|log.Ltime)
+		Warning: log.New(warningHandle,
+			m.Sprintf("WARNING: "),
+			log.Ldate|log.Ltime),
 
-	Error = log.New(errorHandle,
-		r.Sprintf("ERROR: "),
-		log.Ldate|log.Ltime)
+		Error: log.New(errorHandle,
+			r.Sprintf("ERROR: "),
+			log.Ldate|log.Ltime),
+	}
 }
 
 var d = net.Dialer{}
@@ -226,17 +219,15 @@ func readLines(path string) ([]string, error) {
 	}
 	return lines, scanner.Err()
 }
-
-func GetDataFromFile(fileName string) (data []string, err error) {
+func GetDataFromFile(l Loggers, fileName string) (data []string, err error) {
 	if fileName != "" {
-		data, err := readLines(fileName)
+		data, err = readLines(fileName)
 		if err != nil {
-			Error.Printf("File: %v does not exist, or you do not have permz (%v)\n", fileName, err)
+			l.Error.Printf("File: %v does not exist, or you do not have permz (%v)\n", fileName, err)
 			return nil, err
 		}
-		return data, err
 	}
-	return
+	return data, err
 }
 
 // Taken from gobuster - THANKS! /**/
@@ -248,7 +239,7 @@ func StrArrToInt(t []string) (t2 []int) {
 		}
 		j, err := strconv.Atoi(i)
 		if err != nil {
-			panic(err)
+			return t2
 		}
 		t2 = append(t2, j)
 	}
@@ -344,20 +335,18 @@ func GenerateURLs(targetList StringSet, Ports IntSet, Paths *StringSet, targets 
 	}
 }
 
-func ParseURLToHost(URL string, targets chan Host) {
+func ParseURLToHost(l Loggers, URL string, targets chan Host) {
 	URL = strings.TrimSpace(URL)
 	if URL == "" {
 		return
 	}
-	
+
 	URLObj, err := url.ParseRequestURI(URL)
 	if err != nil || URLObj.Scheme == "" {
 		// Attempt to add http:// if no scheme was provided
 		URLObj, err = url.ParseRequestURI("http://" + URL)
 		if err != nil {
-			if Error != nil {
-				Error.Printf("Invalid URL provided and could not be parsed: %s\n", URL)
-			}
+			l.Error.Printf("Invalid URL provided and could not be parsed: %s\n", URL)
 			return
 		}
 	}
@@ -435,8 +424,8 @@ func UnpackPortString(ports string) (ProcessedPorts IntSet) {
 	return
 }
 
-func (host *Host) makeHTTPRequest(url string) (req *http.Request, resp *http.Response, err error) {
-	req, err = http.NewRequest("GET", url, nil)
+func (host *Host) makeHTTPRequest(ctx context.Context, url string) (req *http.Request, resp *http.Response, err error) {
+	req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return
 	}
@@ -447,7 +436,7 @@ func (host *Host) makeHTTPRequest(url string) (req *http.Request, resp *http.Res
 		req.Host = host.HostHeader
 	}
 	// TODO: support additional custom headers
-	//	- Will probably require a cmdline arg for JSON header object or something?
+	//      - Will probably require a cmdline arg for JSON header object or something?
 	for header, value := range host.RequestHeaders {
 		req.Header.Set(header, value)
 	}

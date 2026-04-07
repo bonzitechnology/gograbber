@@ -26,8 +26,10 @@ func TestBuildResponseHeader(t *testing.T) {
 }
 
 func TestReport(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	tempDir := t.TempDir()
 	s := &State{
+		Log:             loggers,
 		ProjectName:     "TestProject",
 		ReportDirectory: tempDir,
 		OutputFormats:   []string{"md", "json", "csv", "xml"},
@@ -42,7 +44,10 @@ func TestReport(t *testing.T) {
 	targets <- host
 	close(targets)
 
-	reportFiles := Report(s, targets)
+	reportFiles, err := Report(s, targets)
+	if err != nil {
+		t.Errorf("Report failed: %v", err)
+	}
 	if len(reportFiles) != 4 {
 		t.Errorf("Expected 4 report files, got %d", len(reportFiles))
 	}
@@ -54,6 +59,7 @@ func TestReport(t *testing.T) {
 }
 
 func TestWriterWorker(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	tmpfile, err := os.CreateTemp("", "testwriter")
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +68,7 @@ func TestWriterWorker(t *testing.T) {
 	tmpfile.Close()
 
 	writeChan := make(chan []byte, 10)
-	go writerWorker(writeChan, tmpfile.Name())
+	go writerWorker(loggers, writeChan, tmpfile.Name())
 
 	writeChan <- []byte("test data\n")
 	writeChan <- []byte("more data\n")

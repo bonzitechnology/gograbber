@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-func Screenshot(s *State, DirbustChan chan Host, ScreenshotChan chan Host, currTime string, threadChan chan struct{}, wg *sync.WaitGroup) {
+func Screenshot(ctx context.Context, s *State, DirbustChan chan Host, ScreenshotChan chan Host, currTime string, threadChan chan struct{}, wg *sync.WaitGroup) {
 	defer func() {
 		close(ScreenshotChan)
 		wg.Done()
@@ -30,17 +31,22 @@ func Screenshot(s *State, DirbustChan chan Host, ScreenshotChan chan Host, currT
 	var cnt int
 	screenshotWorkers := make(chan struct{}, s.NumScreenshotWorkers)
 	for host := range DirbustChan {
-		screenshotWorkers <- struct{}{}
-		screenshotWg.Add(1)
-		atomic.AddInt64(&s.ScreenshotCounter, 1)
-		go ScreenshotAURL(&screenshotWg, s, cnt, host, ScreenshotChan, screenshotWorkers)
-		cnt++
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			screenshotWorkers <- struct{}{}
+			screenshotWg.Add(1)
+			atomic.AddInt64(&s.ScreenshotCounter, 1)
+			go ScreenshotAURL(ctx, &screenshotWg, s, cnt, host, ScreenshotChan, screenshotWorkers)
+			cnt++
+		}
 	}
 	screenshotWg.Wait()
 }
 
 // Screenshots a url derived from a Host{} object
-func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results chan Host, threads chan struct{}) (err error) {
+func ScreenshotAURL(ctx context.Context, wg *sync.WaitGroup, s *State, cnt int, host Host, results chan Host, threads chan struct{}) (err error) {
 	defer func() {
 		<-threads
 		wg.Done()
@@ -52,7 +58,7 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 		host.Path = host.Path[1:] // strip preceding '/' char
 	}
 	if s.Debug {
-		Debug.Printf("Trying to screenshot URL: %v\n", url)
+		s.Log.Debug.Printf("Trying to screenshot URL: %v\n", url)
 	}
 	ApplyJitter(s.Jitter)
 	
@@ -60,7 +66,7 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 	
 	page, err := s.Browser.Timeout(timeout).Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
-		Error.Printf("Unable to create page: %v (%v)\n", url, err)
+		s.Log.Error.Printf("Unable to create page: %v (%v)\n", url, err)
 		return err
 	}
 	defer page.Close()
@@ -91,8 +97,8 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 	}
 
 	// Wait for network idle or load
-	_ = page.Timeout(timeout).Navigate(url)
-	_ = page.Timeout(timeout).WaitLoad()
+	_ = page.Timeout(timeout).Context(ctx).Navigate(url)
+	_ = page.Timeout(timeout).Context(ctx).WaitLoad()
 
 	// Setup the viewport
 	err = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
@@ -101,7 +107,7 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 		DeviceScaleFactor: 1,
 	})
 	if err != nil {
-		Error.Printf("Unable to set Viewport size: %v (%v)\n", url, err)
+		s.Log.Error.Printf("Unable to set Viewport size: %v (%v)\n", url, err)
 		return err
 	}
 	
@@ -118,22 +124,22 @@ func ScreenshotAURL(wg *sync.WaitGroup, s *State, cnt int, host Host, results ch
 		format = proto.PageCaptureScreenshotFormatJpeg
 	}
 	
-	img, err := page.Timeout(timeout).Screenshot(false, &proto.PageCaptureScreenshot{
+	img, err := page.Timeout(timeout).Context(ctx).Screenshot(false, &proto.PageCaptureScreenshot{
 		Format:  format,
 		Quality: &s.ScreenshotQuality,
 	})
 	if err != nil {
-		Error.Printf("Unable to save Screenshot: %v (%v)\n", url, err)
+		s.Log.Error.Printf("Unable to save Screenshot: %v (%v)\n", url, err)
 		return err
 	}
 	
 	err = os.WriteFile(screenshotFilename, img, 0644)
 	if err != nil {
-		Error.Printf("Unable to write Screenshot file: %v (%v)\n", url, err)
+		s.Log.Error.Printf("Unable to write Screenshot file: %v (%v)\n", url, err)
 		return err
 	}
 
-	Good.Printf("Screenshot for [%v] saved to: [%v]\n", g.Sprintf("%s", url), g.Sprintf("%s", screenshotFilename))
+	s.Log.Good.Printf("Screenshot for [%v] saved to: [%v]\n", g.Sprintf("%s", url), g.Sprintf("%s", screenshotFilename))
 	host.ScreenshotFilename = screenshotFilename
 	results <- host
 	return nil

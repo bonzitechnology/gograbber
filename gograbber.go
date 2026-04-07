@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	// "./libgograbber"
 	"github.com/bonzitechnology/gograbber/libgograbber"
 )
 
@@ -31,7 +31,7 @@ func parseCMDLine() *libgograbber.State {
 	var httpHeaders string
 	var extensions string
 	var outputFormats string
-	libgograbber.InitLogger(os.Stdout, os.Stderr, os.Stderr, os.Stderr, os.Stderr)
+	s.Log = libgograbber.InitLogger(os.Stdout, os.Stderr, os.Stderr, os.Stderr, os.Stderr)
 
 	// Commandline arguments
 	// Global
@@ -65,6 +65,7 @@ func parseCMDLine() *libgograbber.State {
 	flag.Float64Var(&s.Ratio, "r", 0.95, "Soft 404 detection comparison ratio.")
 	flag.BoolVar(&s.Soft404Detection, "soft404", true, "Perform soft 404 detection")
 	flag.StringVar(&s.Canary, "canary", "", "Provide a custom canary value for soft 404 detection")
+	flag.IntVar(&s.MaxRedirects, "max-redirects", 5, "Maximum number of HTTP redirects to follow")
 
 	// Reporting
 	flag.StringVar(&s.OutputDirectory, "o", "gograbber_output", "Directory to store output in")
@@ -95,7 +96,7 @@ func parseCMDLine() *libgograbber.State {
 
 	if s.Debug {
 		go func() {
-			libgograbber.Debug.Println("Profiler running on: localhost:6060")
+			s.Log.Debug.Println("Profiler running on: localhost:6060")
 			http.ListenAndServe("localhost:6060", nil)
 		}()
 	}
@@ -108,6 +109,9 @@ func main() {
 
 	state := parseCMDLine()
 	
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -116,12 +120,12 @@ func main() {
 		if state != nil && state.Browser != nil {
 			state.Browser.MustClose()
 		}
-		os.Exit(1)
+		cancel()
 	}()
 
 	// lib.PrintOpts(state)
 	if state != nil {
 		// dothething awww ye
-		libgograbber.Start(state)
+		libgograbber.Start(ctx, state)
 	}
 }

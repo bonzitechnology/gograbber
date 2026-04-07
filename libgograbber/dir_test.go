@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestHTTPGetter(t *testing.T) {
-	InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	// Start a local HTTP server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/found" {
@@ -31,6 +32,13 @@ func TestHTTPGetter(t *testing.T) {
 	var port int
 	fmt.Sscanf(portStr, "%d", &port)
 
+	s := &State{
+		Log:             loggers,
+		MaxRedirects:    5,
+		FollowRedirects: true,
+		Ratio:           0.95,
+	}
+
 	host := Host{
 		HostAddr: hostAddr,
 		Port:     port,
@@ -43,11 +51,12 @@ func TestHTTPGetter(t *testing.T) {
 	var wg sync.WaitGroup
 
 	tempDir := t.TempDir()
+	s.HTTPResponseDirectory = tempDir
 
 	// Case 1: Found
 	wg.Add(1)
 	threads <- struct{}{}
-	go HTTPGetter(&wg, host, false, 0, false, IntSet{Set: map[int]bool{}}, 0.95, "/found", results, threads, "testProject", tempDir, writeChan, true)
+	go HTTPGetter(context.Background(), &wg, s, host, "/found", results, threads, writeChan)
 	wg.Wait()
 
 	gotHost := <-results
@@ -58,7 +67,7 @@ func TestHTTPGetter(t *testing.T) {
 	// Case 2: Redirect
 	wg.Add(1)
 	threads <- struct{}{}
-	go HTTPGetter(&wg, host, false, 0, false, IntSet{Set: map[int]bool{}}, 0.95, "/redirect", results, threads, "testProject", tempDir, writeChan, true)
+	go HTTPGetter(context.Background(), &wg, s, host, "/redirect", results, threads, writeChan)
 	wg.Wait()
 
 	gotHost = <-results
@@ -67,10 +76,10 @@ func TestHTTPGetter(t *testing.T) {
 	}
 	
 	// Case 3: Ignored status
-	ign := IntSet{Set: map[int]bool{404: true}}
+	s.StatusCodesIgn = IntSet{Set: map[int]bool{404: true}}
 	wg.Add(1)
 	threads <- struct{}{}
-	go HTTPGetter(&wg, host, false, 0, false, ign, 0.95, "/notfound", results, threads, "testProject", tempDir, writeChan, true)
+	go HTTPGetter(context.Background(), &wg, s, host, "/notfound", results, threads, writeChan)
 	wg.Wait()
 
 	select {
@@ -98,6 +107,7 @@ func TestSoft404Detection(t *testing.T) {
 }
 
 func TestPerformSoft404Check(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "random page content")
 	}))
@@ -108,13 +118,16 @@ func TestPerformSoft404Check(t *testing.T) {
 	var port int
 	fmt.Sscanf(portStr, "%d", &port)
 
+	s := &State{
+		Log: loggers,
+	}
 	host := Host{
 		HostAddr: hostAddr,
 		Port:     port,
 		Protocol: "http",
 	}
 
-	gotHost := PerformSoft404Check(host, false, "canary123")
+	gotHost := PerformSoft404Check(s, host, false, "canary123")
 	if gotHost.Soft404RandomURL == "" {
 		t.Error("Expected Soft404RandomURL to be set")
 	}
@@ -124,8 +137,10 @@ func TestPerformSoft404Check(t *testing.T) {
 }
 
 func TestDirbRunner(t *testing.T) {
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "OK")
 	}))
 	defer ts.Close()
 
@@ -134,9 +149,17 @@ func TestDirbRunner(t *testing.T) {
 	var port int
 	fmt.Sscanf(portStr, "%d", &port)
 
+	tempDir := t.TempDir()
 	s := &State{
-		Paths:      StringSet{Set: map[string]bool{"/test": true}},
-		Extensions: StringSet{Set: map[string]bool{"": true}},
+		Log:                   loggers,
+		Dirbust:               true,
+		VerbosityLevel:        5,
+		HTTPResponseDirectory: tempDir,
+		Paths:                 StringSet{Set: map[string]bool{"test": true}},
+		Extensions:            StringSet{Set: map[string]bool{"": true}},
+		Protocols:             StringSet{Set: map[string]bool{"http": true}},
+		StatusCodesIgn:        IntSet{Set: map[int]bool{}},
+		MaxRedirects:          5,
 	}
 	h := Host{
 		HostAddr: hostAddr,
@@ -150,8 +173,12 @@ func TestDirbRunner(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go dirbRunner(s, h, &wg, threads, results, writeChan)
+	go dirbRunner(context.Background(), s, h, &wg, threads, results, writeChan)
 	wg.Wait()
+	
+	// We need to wait for the HTTPGetter goroutines which are also added to the same wg
+	// Wait, dirbRunner calls dirbWg.Add(1) for each HTTPGetter.
+	
 	close(results)
 
 	var count int

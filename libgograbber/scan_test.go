@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestConnectHost(t *testing.T) {
-	InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	// Start a local listener
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -34,7 +35,7 @@ func TestConnectHost(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go ConnectHost(&wg, time.Second, 0, false, host, results, threads, writeChan)
+	go ConnectHost(context.Background(), &wg, loggers, time.Second, 0, false, host, results, threads, writeChan)
 
 	wg.Wait()
 	close(results)
@@ -52,7 +53,7 @@ func TestConnectHost(t *testing.T) {
 	results = make(chan Host, 1)
 	threads <- struct{}{}
 	wg.Add(1)
-	go ConnectHost(&wg, 100*time.Millisecond, 0, false, host, results, threads, writeChan)
+	go ConnectHost(context.Background(), &wg, loggers, 100*time.Millisecond, 0, false, host, results, threads, writeChan)
 	wg.Wait()
 	close(results)
 	_, ok = <-results

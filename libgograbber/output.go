@@ -21,7 +21,7 @@ func buildResponseHeader(header *http.Response) string {
 	return buf.String()
 }
 
-func Report(s *State, targets chan Host) []string {
+func Report(s *State, targets chan Host) ([]string, error) {
 	var results []Host
 	for host := range targets {
 		results = append(results, host)
@@ -30,21 +30,29 @@ func Report(s *State, targets chan Host) []string {
 	var reportFiles []string
 	for _, format := range s.OutputFormats {
 		format = strings.TrimSpace(strings.ToLower(format))
+		var reportFile string
+		var err error
 		switch format {
 		case "md":
-			reportFiles = append(reportFiles, MarkdownReport(s, results))
+			reportFile, err = MarkdownReport(s, results)
 		case "json":
-			reportFiles = append(reportFiles, JsonReport(s, results))
+			reportFile, err = JsonReport(s, results)
 		case "csv":
-			reportFiles = append(reportFiles, CsvReport(s, results))
+			reportFile, err = CsvReport(s, results)
 		case "xml":
-			reportFiles = append(reportFiles, XmlReport(s, results))
+			reportFile, err = XmlReport(s, results)
+		}
+		if err != nil {
+			return reportFiles, err
+		}
+		if reportFile != "" {
+			reportFiles = append(reportFiles, reportFile)
 		}
 	}
-	return reportFiles
+	return reportFiles, nil
 }
 
-func MarkdownReport(s *State, results []Host) string {
+func MarkdownReport(s *State, results []Host) (string, error) {
 	var report bytes.Buffer
 	currTime := GetTimeString()
 
@@ -56,7 +64,7 @@ func MarkdownReport(s *State, results []Host) string {
 	}
 	file, err := os.Create(reportFile)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	defer file.Close()
 
@@ -81,10 +89,10 @@ func MarkdownReport(s *State, results []Host) string {
 		file.WriteString(report.String())
 		report.Reset()
 	}
-	return reportFile
+	return reportFile, nil
 }
 
-func JsonReport(s *State, results []Host) string {
+func JsonReport(s *State, results []Host) (string, error) {
 	currTime := GetTimeString()
 	var reportFile string
 	if s.ProjectName != "" {
@@ -94,7 +102,7 @@ func JsonReport(s *State, results []Host) string {
 	}
 	file, err := os.Create(reportFile)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	defer file.Close()
 
@@ -102,12 +110,12 @@ func JsonReport(s *State, results []Host) string {
 	encoder.SetIndent("", "  ")
 	err = encoder.Encode(results)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	return reportFile
+	return reportFile, nil
 }
 
-func CsvReport(s *State, results []Host) string {
+func CsvReport(s *State, results []Host) (string, error) {
 	currTime := GetTimeString()
 	var reportFile string
 	if s.ProjectName != "" {
@@ -117,7 +125,7 @@ func CsvReport(s *State, results []Host) string {
 	}
 	file, err := os.Create(reportFile)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	defer file.Close()
 
@@ -135,7 +143,7 @@ func CsvReport(s *State, results []Host) string {
 			host.ResponseBodyFilename,
 		})
 	}
-	return reportFile
+	return reportFile, nil
 }
 
 type XmlReportWrapper struct {
@@ -144,7 +152,7 @@ type XmlReportWrapper struct {
 	Hosts   []Host   `xml:"host"`
 }
 
-func XmlReport(s *State, results []Host) string {
+func XmlReport(s *State, results []Host) (string, error) {
 	currTime := GetTimeString()
 	var reportFile string
 	if s.ProjectName != "" {
@@ -154,7 +162,7 @@ func XmlReport(s *State, results []Host) string {
 	}
 	file, err := os.Create(reportFile)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	defer file.Close()
 
@@ -168,9 +176,9 @@ func XmlReport(s *State, results []Host) string {
 	file.WriteString(xml.Header)
 	err = encoder.Encode(wrapper)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	return reportFile
+	return reportFile, nil
 }
 
 func SanitiseFilename(UnsanitisedFilename string) string {
@@ -178,13 +186,14 @@ func SanitiseFilename(UnsanitisedFilename string) string {
 	return r.ReplaceAllString(UnsanitisedFilename, "_")
 }
 
-func writerWorker(writeChan chan []byte, filename string) {
+func writerWorker(l Loggers, writeChan chan []byte, filename string) {
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if os.IsNotExist(err) {
 		file, err = os.Create(filename)
 	}
 	if err != nil {
-		panic(err)
+		l.Error.Printf("Failed to open output file %s: %v\n", filename, err)
+		return
 	}
 	defer file.Close()
 	writer := bufio.NewWriter(file)

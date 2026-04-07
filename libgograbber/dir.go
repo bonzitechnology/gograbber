@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -10,7 +11,7 @@ import (
 	"sync/atomic"
 )
 
-func Dirbust(s *State, ScanChan chan Host, DirbustChan chan Host, currTime string, threadChan chan struct{}, wg *sync.WaitGroup) {
+func Dirbust(ctx context.Context, s *State, ScanChan chan Host, DirbustChan chan Host, currTime string, threadChan chan struct{}, wg *sync.WaitGroup) {
 	defer func() {
 		close(DirbustChan)
 		wg.Done()
@@ -41,42 +42,47 @@ func Dirbust(s *State, ScanChan chan Host, DirbustChan chan Host, currTime strin
 	} else {
 		dirbustOutFile = fmt.Sprintf("%v/urls_%v_%v.txt", s.DirbustOutputDirectory, currTime, rand.Int63())
 	}
-	go writerWorker(dWriteChan, dirbustOutFile)
+	go writerWorker(s.Log, dWriteChan, dirbustOutFile)
 	
 	for host := range ScanChan {
-		dirbWg.Add(1)
-		host.RequestHeaders = s.HttpHeaders
-		host.UserAgent = s.UserAgent
-		host.Cookies = s.Cookies
-		for hostHeader, _ := range s.HostHeaders.Set {
-			host.HostHeader = hostHeader
-			if s.URLProvided {
-				var h Host
-				h = host
-				dirbWg.Add(1)
-				go dirbRunner(s, h, &dirbWg, threadChan, DirbustChan, dWriteChan)
-
-			} else {
-				for scheme := range s.Protocols.Set {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			dirbWg.Add(1)
+			host.RequestHeaders = s.HttpHeaders
+			host.UserAgent = s.UserAgent
+			host.Cookies = s.Cookies
+			for hostHeader, _ := range s.HostHeaders.Set {
+				host.HostHeader = hostHeader
+				if s.URLProvided {
 					var h Host
 					h = host
-					h.Protocol = scheme // Weird hack to fix a random race condition...
 					dirbWg.Add(1)
-					go dirbRunner(s, h, &dirbWg, threadChan, DirbustChan, dWriteChan)
+					go dirbRunner(ctx, s, h, &dirbWg, threadChan, DirbustChan, dWriteChan)
+
+				} else {
+					for scheme := range s.Protocols.Set {
+						var h Host
+						h = host
+						h.Protocol = scheme // Weird hack to fix a random race condition...
+						dirbWg.Add(1)
+						go dirbRunner(ctx, s, h, &dirbWg, threadChan, DirbustChan, dWriteChan)
+					}
 				}
 			}
+			dirbWg.Done()
 		}
-		dirbWg.Done()
 	}
 	dirbWg.Wait()
 	close(dWriteChan)
 }
 
-func dirbRunner(s *State, h Host, dirbWg *sync.WaitGroup, threadChan chan struct{}, DirbustChan chan Host, dWriteChan chan []byte) {
+func dirbRunner(ctx context.Context, s *State, h Host, dirbWg *sync.WaitGroup, threadChan chan struct{}, DirbustChan chan Host, dWriteChan chan []byte) {
 	defer dirbWg.Done()
 
 	if s.Soft404Detection {
-		h = PerformSoft404Check(h, s.Debug, s.Canary)
+		h = PerformSoft404Check(s, h, s.Debug, s.Canary)
 	}
 	for path, _ := range s.Paths.Set {
 		var p string
@@ -90,15 +96,20 @@ func dirbRunner(s *State, h Host, dirbWg *sync.WaitGroup, threadChan chan struct
 			} else {
 				extPath = fmt.Sprintf("%s.%s", p, ext)
 			}
-			dirbWg.Add(1)
-			threadChan <- struct{}{}
-			atomic.AddInt64(&s.DirbustCounter, 1)
-			go HTTPGetter(dirbWg, h, s.Debug, s.Jitter, s.Soft404Detection, s.StatusCodesIgn, s.Ratio, extPath, DirbustChan, threadChan, s.ProjectName, s.HTTPResponseDirectory, dWriteChan, s.FollowRedirects)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				dirbWg.Add(1)
+				threadChan <- struct{}{}
+				atomic.AddInt64(&s.DirbustCounter, 1)
+				go HTTPGetter(ctx, dirbWg, s, h, extPath, DirbustChan, threadChan, dWriteChan)
+			}
 		}
 	}
 }
 
-func HTTPGetter(wg *sync.WaitGroup, host Host, debug bool, Jitter int, soft404Detection bool, statusCodesIgn IntSet, Ratio float64, path string, results chan Host, threads chan struct{}, ProjectName string, responseDirectory string, writeChan chan []byte, followRedirects bool) {
+func HTTPGetter(ctx context.Context, wg *sync.WaitGroup, s *State, host Host, path string, results chan Host, threads chan struct{}, writeChan chan []byte) {
 	defer func() {
 		<-threads
 		wg.Done()
@@ -108,29 +119,29 @@ func HTTPGetter(wg *sync.WaitGroup, host Host, debug bool, Jitter int, soft404De
 		path = path[1:] // strip preceding '/' char
 	}
 	Url := fmt.Sprintf("%v://%v:%v/%v", host.Protocol, host.HostAddr, host.Port, path)
-	if debug {
-		Debug.Printf("Trying URL: %v\n", Url)
+	if s.Debug {
+		s.Log.Debug.Printf("Trying URL: %v\n", Url)
 	}
-	ApplyJitter(Jitter)
+	ApplyJitter(s.Jitter)
 
 	var err error
 	nextUrl := Url
 	var i int
 	var redirs []string
-	numRedirects := 5
+	numRedirects := s.MaxRedirects
 	for i < numRedirects { // number of times to follow redirect
 		i++
 
-		host.HTTPReq, host.HTTPResp, err = host.makeHTTPRequest(nextUrl)
+		host.HTTPReq, host.HTTPResp, err = host.makeHTTPRequest(ctx, nextUrl)
 		if err != nil {
 			return
 		}
-		if statusCodesIgn.Contains(host.HTTPResp.StatusCode) {
+		if s.StatusCodesIgn.Contains(host.HTTPResp.StatusCode) {
 			host.HTTPResp.Body.Close()
 			return
 		}
 		
-		if host.HTTPResp.StatusCode >= 300 && host.HTTPResp.StatusCode < 400 && followRedirects {
+		if host.HTTPResp.StatusCode >= 300 && host.HTTPResp.StatusCode < 400 && s.FollowRedirects {
 			host.HTTPResp.Body.Close()
 			x, err := host.HTTPResp.Location()
 			if err == nil {
@@ -141,8 +152,8 @@ func HTTPGetter(wg *sync.WaitGroup, host Host, debug bool, Jitter int, soft404De
 				break
 			}
 		} else {
-			if followRedirects && len(redirs) > 0 {
-				Good.Printf("Redirect %v->[%v - %v]", strings.Join(redirs, "->"), y.Sprintf("%d", host.HTTPResp.StatusCode), g.Sprintf("%s", nextUrl))
+			if s.FollowRedirects && len(redirs) > 0 {
+				s.Log.Good.Printf("Redirect %v->[%v - %v]", strings.Join(redirs, "->"), y.Sprintf("%d", host.HTTPResp.StatusCode), g.Sprintf("%s", nextUrl))
 			}
 			Url = nextUrl
 			break
@@ -159,32 +170,32 @@ func HTTPGetter(wg *sync.WaitGroup, host Host, debug bool, Jitter int, soft404De
 		return
 	}
 
-	if soft404Detection && path != "" && host.Soft404RandomPageContents != nil {
+	if s.Soft404Detection && path != "" && host.Soft404RandomPageContents != nil {
 		soft404Ratio := detectSoft404(buf, host.Soft404RandomPageContents)
-		if soft404Ratio > Ratio {
-			if debug {
-				Debug.Printf("[%v] is very similar to [%v] (%v match)\n", y.Sprintf("%s", Url), y.Sprintf("%s", host.Soft404RandomURL), y.Sprintf("%.4f%%", (soft404Ratio*100)))
+		if soft404Ratio > s.Ratio {
+			if s.Debug {
+				s.Log.Debug.Printf("[%v] is very similar to [%v] (%v match)\n", y.Sprintf("%s", Url), y.Sprintf("%s", host.Soft404RandomURL), y.Sprintf("%.4f%%", (soft404Ratio*100)))
 			}
 			return
 		}
 	}
 
 	if host.HostHeader != "" {
-		Good.Printf("%v - %v [%v bytes] (HostHeader: %v)\n", Url, g.Sprintf("%d", host.HTTPResp.StatusCode), len(buf), host.HostHeader)
+		s.Log.Good.Printf("%v - %v [%v bytes] (HostHeader: %v)\n", Url, g.Sprintf("%d", host.HTTPResp.StatusCode), len(buf), host.HostHeader)
 	} else {
-		Good.Printf("%v - %v [%v bytes]\n", Url, g.Sprintf("%d", host.HTTPResp.StatusCode), len(buf))
+		s.Log.Good.Printf("%v - %v [%v bytes]\n", Url, g.Sprintf("%d", host.HTTPResp.StatusCode), len(buf))
 	}
 	currTime := GetTimeString()
 
 	var responseFilename string
-	if ProjectName != "" {
-		responseFilename = fmt.Sprintf("%v/%v_%v-%v_%v.html", responseDirectory, strings.ToLower(SanitiseFilename(ProjectName)), SanitiseFilename(Url), currTime, rand.Int63())
+	if s.ProjectName != "" {
+		responseFilename = fmt.Sprintf("%v/%v_%v-%v_%v.html", s.HTTPResponseDirectory, strings.ToLower(SanitiseFilename(s.ProjectName)), SanitiseFilename(Url), currTime, rand.Int63())
 	} else {
-		responseFilename = fmt.Sprintf("%v/%v-%v_%v.html", responseDirectory, SanitiseFilename(Url), currTime, rand.Int63())
+		responseFilename = fmt.Sprintf("%v/%v-%v_%v.html", s.HTTPResponseDirectory, SanitiseFilename(Url), currTime, rand.Int63())
 	}
 	file, err := os.Create(responseFilename)
 	if err != nil {
-		Error.Printf("%v\n", err)
+		s.Log.Error.Printf("%v\n", err)
 	} else {
 		if len(buf) > 0 {
 			file.Write(buf)
@@ -200,7 +211,7 @@ func HTTPGetter(wg *sync.WaitGroup, host Host, debug bool, Jitter int, soft404De
 	results <- host
 }
 
-func PerformSoft404Check(h Host, debug bool, canary string) Host {
+func PerformSoft404Check(s *State, h Host, debug bool, canary string) Host {
 	var knary string
 	if canary != "" {
 		knary = canary
@@ -209,18 +220,18 @@ func PerformSoft404Check(h Host, debug bool, canary string) Host {
 	}
 	randURL := fmt.Sprintf("%v://%v:%v/%v", h.Protocol, h.HostAddr, h.Port, knary)
 	if debug {
-		Debug.Printf("Soft404 checking [%v]\n", randURL)
+		s.Log.Debug.Printf("Soft404 checking [%v]\n", randURL)
 	}
-	_, randResp, err := h.makeHTTPRequest(randURL)
+	_, randResp, err := h.makeHTTPRequest(context.Background(), randURL)
 	if err != nil {
 		if debug {
-			Error.Printf("Soft404 check failed... [%v] Err:[%v] \n", randURL, err)
+			s.Log.Error.Printf("Soft404 check failed... [%v] Err:[%v] \n", randURL, err)
 		}
 	} else {
 		defer randResp.Body.Close()
 		data, err := ioutil.ReadAll(randResp.Body)
 		if err != nil {
-			Error.Printf("uhhh... [%v]\n", err)
+			s.Log.Error.Printf("uhhh... [%v]\n", err)
 			return h
 		}
 		h.Soft404RandomURL = randURL

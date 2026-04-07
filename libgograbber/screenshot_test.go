@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestScreenshotAURL(t *testing.T) {
-	InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
+	loggers := InitLogger(os.Stdout, os.Stdout, os.Stdout, os.Stdout, os.Stdout)
 	if testing.Short() {
 		t.Skip("skipping screenshot test in short mode")
 	}
@@ -48,6 +49,7 @@ func TestScreenshotAURL(t *testing.T) {
 	defer browser.Close()
 
 	s := &State{
+		Log:                  loggers,
 		Browser:              browser,
 		ScreenshotDirectory:  t.TempDir(),
 		ImgX:                 1024,
@@ -63,7 +65,7 @@ func TestScreenshotAURL(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	err = ScreenshotAURL(&wg, s, 0, host, results, threads)
+	err = ScreenshotAURL(context.Background(), &wg, s, 0, host, results, threads)
 	if err != nil {
 		t.Errorf("ScreenshotAURL failed: %v", err)
 	}

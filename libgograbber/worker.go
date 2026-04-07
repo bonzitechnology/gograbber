@@ -1,13 +1,14 @@
 package libgograbber
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-func RoutineManager(s *State, ScanChan chan Host, DirbustChan chan Host, ScreenshotChan chan Host, wg *sync.WaitGroup) {
+func RoutineManager(ctx context.Context, s *State, ScanChan chan Host, DirbustChan chan Host, ScreenshotChan chan Host, wg *sync.WaitGroup) {
 	defer wg.Done()
 	threadChan := make(chan struct{}, s.Threads)
 	currTime := GetTimeString()
@@ -17,26 +18,31 @@ func RoutineManager(s *State, ScanChan chan Host, DirbustChan chan Host, Screens
 	go func() {
 		var currTime time.Duration
 		for t := range ticker.C {
-			currTime = t.Sub(startTime)
-			scanCnt := atomic.LoadInt64(&s.ScanCounter)
-			dirbCnt := atomic.LoadInt64(&s.DirbustCounter)
-			screenCnt := atomic.LoadInt64(&s.ScreenshotCounter)
-			
-			if s.Debug {
-				fmt.Print(LineSep())
-				Debug.Printf("Elapsed %v | Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime, scanCnt, dirbCnt, screenCnt)
-				fmt.Print(LineSep())
-			} else {
-				Info.Printf("Progress [%v] - Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime.Round(time.Second), scanCnt, dirbCnt, screenCnt)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				currTime = t.Sub(startTime)
+				scanCnt := atomic.LoadInt64(&s.ScanCounter)
+				dirbCnt := atomic.LoadInt64(&s.DirbustCounter)
+				screenCnt := atomic.LoadInt64(&s.ScreenshotCounter)
+				
+				if s.Debug {
+					fmt.Print(LineSep())
+					s.Log.Debug.Printf("Elapsed %v | Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime, scanCnt, dirbCnt, screenCnt)
+					fmt.Print(LineSep())
+				} else {
+					s.Log.Info.Printf("Progress [%v] - Scanned: %d | Dirbusted: %d | Screenshots: %d\n", currTime.Round(time.Second), scanCnt, dirbCnt, screenCnt)
+				}
 			}
 		}
 	}()
 
 	// Start our operations
 	wg.Add(1)
-	go Scan(s, s.Targets, ScanChan, currTime, threadChan, wg)
+	go Scan(ctx, s, s.Targets, ScanChan, currTime, threadChan, wg)
 	wg.Add(1)
-	go Dirbust(s, ScanChan, DirbustChan, currTime, threadChan, wg)
+	go Dirbust(ctx, s, ScanChan, DirbustChan, currTime, threadChan, wg)
 	wg.Add(1)
-	go Screenshot(s, DirbustChan, ScreenshotChan, currTime, threadChan, wg)
+	go Screenshot(ctx, s, DirbustChan, ScreenshotChan, currTime, threadChan, wg)
 }

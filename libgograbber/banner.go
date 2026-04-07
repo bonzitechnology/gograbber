@@ -45,7 +45,7 @@ func PrintOpts(s *State) {
 	if s.VerbosityLevel > 4 {
 		for i := 0; i < keys.NumField(); i++ {
 			f := keys.Field(i)
-			Debug.Printf("%s: = %v\n", typeOfT.Field(i).Name, f.Interface())
+			s.Log.Debug.Printf("%s: = %v\n", typeOfT.Field(i).Name, f.Interface())
 		}
 		fmt.Print(LineSep())
 	}

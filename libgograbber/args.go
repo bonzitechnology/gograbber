@@ -1,11 +1,20 @@
 package libgograbber
 
 import (
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/go-rod/rod"
 )
+
+type Loggers struct {
+	Good    *log.Logger
+	Info    *log.Logger
+	Warning *log.Logger
+	Debug   *log.Logger
+	Error   *log.Logger
+}
 
 type State struct {
 	Canary                 string
@@ -17,6 +26,7 @@ type State struct {
 	ScreenshotDirectory    string
 	ScreenshotFileType     string
 	FollowRedirects        bool
+	MaxRedirects           int
 	ReportDirectory        string
 	HostHeaders            StringSet
 	HttpHeaders            map[string]string
@@ -73,4 +83,5 @@ type State struct {
 	ScanCounter            int64
 	DirbustCounter         int64
 	ScreenshotCounter      int64
+	Log                    Loggers
 }

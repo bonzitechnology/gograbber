@@ -1,6 +1,7 @@
 package libgograbber
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -17,7 +18,7 @@ import (
 )
 
 // Initialise sets up the program's state
-func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, protocols string, timeout int, AdvancedUsage bool, easy bool, HostHeaderFile string, httpHeaders string, extensions string, outputFormats string) {
+func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, protocols string, timeout int, AdvancedUsage bool, easy bool, HostHeaderFile string, httpHeaders string, extensions string, outputFormats string) error {
 	if AdvancedUsage {
 
 		var Usage = func() {
@@ -63,10 +64,9 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 	s.Extensions.Add("")
 	s.HostHeaders = StringSet{map[string]bool{}}
 	if HostHeaderFile != "" {
-		hostHeaders, err := GetDataFromFile(HostHeaderFile)
+		hostHeaders, err := GetDataFromFile(s.Log, HostHeaderFile)
 		if err != nil {
-			Error.Println(err)
-			panic(err)
+			return err
 		}
 		hostHeadersExpanded := ExpandHosts(hostHeaders)
 		for hostHeader, _ := range hostHeadersExpanded.Set {
@@ -79,7 +79,7 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 	if httpHeaders != "" {
 		err := json.Unmarshal([]byte(httpHeaders), &s.HttpHeaders)
 		if err != nil {
-			Error.Printf("Your JSON looks pretty bad eh. You should do something about that: [%v]", httpHeaders)
+			s.Log.Error.Printf("Your JSON looks pretty bad eh. You should do something about that: [%v]", httpHeaders)
 		}
 	}
 
@@ -111,10 +111,9 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 	s.Paths = StringSet{Set: map[string]bool{}}
 
 	if wordlist != "" {
-		pathData, err := GetDataFromFile(wordlist)
+		pathData, err := GetDataFromFile(s.Log, wordlist)
 		if err != nil {
-			Error.Println(err)
-			panic(err)
+			return err
 		}
 		for _, path := range pathData {
 			s.Paths.Add(path)
@@ -133,22 +132,22 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 				close(s.Targets)
 			}()
 			if s.URLFile != "" {
-				inputData, err := GetDataFromFile(s.URLFile)
+				inputData, err := GetDataFromFile(s.Log, s.URLFile)
 				if err != nil {
-					Error.Println(err)
-					panic(err)
+					s.Log.Error.Println(err)
+					return
 				}
 				for _, item := range inputData {
-					ParseURLToHost(item, s.Targets)
+					ParseURLToHost(s.Log, item, s.Targets)
 				}
 			}
 			if s.SingleURL != "" {
 				s.URLProvided = true
-				Info.Println(s.SingleURL)
-				ParseURLToHost(s.SingleURL, s.Targets)
+				s.Log.Info.Println(s.SingleURL)
+				ParseURLToHost(s.Log, s.SingleURL, s.Targets)
 			}
 		}()
-		return
+		return nil
 	}
 
 	if ports != "" {
@@ -167,14 +166,14 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 
 	}
 	if s.InputFile != "" {
-		inputData, err := GetDataFromFile(s.InputFile)
+		inputData, err := GetDataFromFile(s.Log, s.InputFile)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		targetList := ExpandHosts(inputData)
 		if s.Debug {
 			for target := range targetList.Set {
-				Debug.Printf("Target: %v\n", target)
+				s.Log.Debug.Printf("Target: %v\n", target)
 			}
 		}
 		s.Hosts = targetList
@@ -189,11 +188,11 @@ func Initialise(s *State, ports string, wordlist string, statusCodesIgn string, 
 		flag.Usage()
 		os.Exit(1)
 	}
-	return
+	return nil
 }
 
 // Start does the thing
-func Start(s *State) {
+func Start(ctx context.Context, s *State) {
 	fmt.Print(LineSep())
 
 	os.Mkdir(path.Join(s.OutputDirectory), 0755) // drwxr-xr-x
@@ -212,7 +211,7 @@ func Start(s *State) {
 	}
 	if s.Screenshot {
 		if s.Debug {
-			Debug.Printf("Creating Chromium browser instance... This could take a second\n")
+			s.Log.Debug.Printf("Creating Chromium browser instance... This could take a second\n")
 		}
 		l := launcher.New().Headless(true)
 		if s.IgnoreSSLErrors {
@@ -224,16 +223,16 @@ func Start(s *State) {
 		s.ScreenshotDirectory = path.Join(s.OutputDirectory, "screenshots")
 		os.Mkdir(s.ScreenshotDirectory, 0755) // drwxr-xr-x
 		if s.Debug {
-			Debug.Printf("Screenshot engine initialized.\n")
+			s.Log.Debug.Printf("Screenshot engine initialized.\n")
 		}
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go RoutineManager(s, ScanChan, DirbChan, ScreenshotChan, &wg)
+	go RoutineManager(ctx, s, ScanChan, DirbChan, ScreenshotChan, &wg)
 
 	s.ReportDirectory = path.Join(s.OutputDirectory, "report")
 	os.Mkdir(s.ReportDirectory, 0755) // drwxr-xr-x
-	reportFiles := Report(s, ScreenshotChan)
+	reportFiles, err := Report(s, ScreenshotChan)
 	wg.Wait()
 	
 	if s.Browser != nil {
@@ -242,9 +241,13 @@ func Start(s *State) {
 	
 	currentTime := time.Now()
 	fmt.Print(LineSep())
-	Info.Printf("Gograbber completed in [%v] seconds\n", g.Sprintf("%v", currentTime.Sub(s.StartTime)))
-	for _, reportFile := range reportFiles {
-		Info.Printf("Report written to: [%v]\n", g.Sprintf("%s", reportFile))
+	s.Log.Info.Printf("Gograbber completed in [%v] seconds\n", g.Sprintf("%v", currentTime.Sub(s.StartTime)))
+	if err != nil {
+		s.Log.Error.Printf("Failed to generate report: %v\n", err)
+	} else {
+		for _, reportFile := range reportFiles {
+			s.Log.Info.Printf("Report written to: [%v]\n", g.Sprintf("%s", reportFile))
+		}
 	}
 	fmt.Print(LineSep())
 }
